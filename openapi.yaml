@@ -1,0 +1,89 @@
+openapi: 3.1.0
+info:
+  title: IncuBrix Script and Voiceover to B-roll Engine
+  version: 0.1.0
+servers:
+  - url: http://localhost:8000
+paths:
+  /api/v1/broll/jobs:
+    post:
+      summary: Create a video-render job from a script, scenes, or audio URL
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                audio_url: {type: [string, 'null'], format: uri}
+                script: {type: [string, 'null']}
+                scenes:
+                  type: [array, 'null']
+                  items:
+                    type: object
+                    required: [text]
+                    properties:
+                      text: {type: string}
+                      visual_hint: {type: [string, 'null']}
+                voice: {type: string, default: en-IN-female}
+                aspect_ratios:
+                  type: array
+                  items: {type: string, enum: ['16:9', '9:16', '1:1']}
+                style: {type: string}
+                avoid: {type: array, items: {type: string}}
+                captions:
+                  type: object
+                  properties:
+                    burn_in: {type: boolean}
+                    srt: {type: boolean}
+      responses:
+        '202':
+          description: Job queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id: {type: string, format: uuid}
+                  status_url: {type: string}
+                  idempotent_replay: {type: boolean}
+  /api/v1/jobs/{job_id}:
+    get:
+      summary: Get job status and output links
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Job status}
+        '404': {description: Job not found}
+  /api/v1/jobs/{job_id}/files/{filename}:
+    get:
+      summary: Download a generated result
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: {type: string}
+        - in: path
+          name: filename
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: File download}
+  /health:
+    get:
+      summary: Liveness check
+      responses:
+        '200': {description: Service is alive}
+  /ready:
+    get:
+      summary: Readiness check
+      responses:
+        '200': {description: Dependency status}

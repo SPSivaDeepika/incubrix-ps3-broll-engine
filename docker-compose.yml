@@ -1,0 +1,12 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATA_DIR: /app/data
+      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
+      MAX_AUDIO_BYTES: ${MAX_AUDIO_BYTES:-31457280}
+      LOG_LEVEL: INFO
+    volumes:
+      - ./data:/app/data

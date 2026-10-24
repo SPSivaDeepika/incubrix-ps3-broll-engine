@@ -1,0 +1,12 @@
+[
+  {"name":"tutorial_money","script":"Start by tracking every expense. Review your spending each week. Save a small amount automatically.","aspect_ratios":["16:9"]},
+  {"name":"abstract_trust","script":"Trust is earned slowly. Keep your promises. Be honest when mistakes happen.","aspect_ratios":["16:9"]},
+  {"name":"statistics","script":"Sales grew 40 percent in 2025. Compare the source data before drawing conclusions.","aspect_ratios":["16:9"]},
+  {"name":"double_meaning_bank","script":"The river bank is covered with trees. A financial bank offers savings accounts.","aspect_ratios":["16:9"]},
+  {"name":"cloud_computing","script":"Cloud computing lets teams access software over the internet. Back up important files.","aspect_ratios":["16:9","9:16"]},
+  {"name":"product_promo","script":"Meet a simple reusable water bottle. Carry it to work. Refill it throughout the day.","aspect_ratios":["9:16"]},
+  {"name":"short_story","script":"Maya planted a seed. She watered the soil each morning. Weeks later, a small green shoot appeared.","aspect_ratios":["16:9"]},
+  {"name":"sensitive_topic","script":"When a community faces a difficult event, share verified information and respect affected families.","aspect_ratios":["16:9"]},
+  {"name":"scene_list","scenes":[{"text":"A student studies at a desk","visual_hint":"study desk notebook pencil"},{"text":"The student takes a short break","visual_hint":"quiet park walking path"}],"aspect_ratios":["16:9"]},
+  {"name":"numbers","script":"The temperature reached 32 degrees. Check the local forecast before travelling.","aspect_ratios":["1:1"]}
+]
