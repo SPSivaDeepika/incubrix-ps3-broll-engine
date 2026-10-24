@@ -18,6 +18,7 @@ BASE = Path(os.getenv("DATA_DIR", "data")).resolve()
 JOBS = BASE / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+BROLL_DIR = Path(__file__).resolve().parent.parent / "assets" / "broll"
 MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_BYTES", str(30 * 1024 * 1024)))
 FFMPEG = os.getenv("FFMPEG_PATH", "ffmpeg")
 ESPEAK = os.getenv("ESPEAK_PATH", "espeak-ng")
@@ -194,30 +195,106 @@ def render_job(job_id: str, request_data: dict[str, Any], audio_upload: str | No
                          "reason_chosen": "Safe no-key fallback; keyword-driven scene label only, not semantic visual retrieval", "relevance_score": None}
             clip_file = jobdir / f"scene_{idx:03}.mp4"
             visual_file = jobdir / f"scene_{idx:03}.png"
-            pexels, provider_warning = choose_pexels_video(hint, "portrait" if "9:16" in payload.aspect_ratios else "landscape", used_video_ids)
-            if pexels:
+            local_clips = sorted(
+                p for p in BROLL_DIR.glob("*")
+                if p.is_file() and p.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
+            )
+            used_real_clip = False
+
+            # Prefer local B-roll. Cycle through available clips across scenes.
+            if local_clips:
+                local_clip = local_clips[idx % len(local_clips)]
                 try:
-                    vpath = jobdir / f"source_{idx:03}.mp4"
-                    with requests.get(pexels["url"], stream=True, timeout=(5,30)) as rr:
-                        rr.raise_for_status()
-                        with vpath.open("wb") as out:
-                            total=0
-                            for chunk in rr.iter_content(1024*128):
-                                total += len(chunk)
-                                if total > 100*1024*1024: raise ValueError("Downloaded clip exceeds 100 MB")
-                                out.write(chunk)
-                    # Create a normalized scene clip; scene duration follows the narration.
-                    ffmpeg_run([FFMPEG,"-y","-stream_loop","-1","-i",str(vpath),"-t",f"{end_s-start_s:.3f}","-vf","scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,format=yuv420p","-an","-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p",str(clip_file)])
-                    clip_meta={"ai_generated":False,"source":"Pexels","source_url":pexels["page"],"license":pexels["license"],"license_url":pexels["license_url"],"attribution":pexels["photographer"],"reason_chosen":f"First unused Pexels result for scene hint: {hint}","relevance_score":None}
+                    ffmpeg_run([
+                        FFMPEG, "-y", "-stream_loop", "-1", "-i", str(local_clip),
+                        "-t", f"{end_s-start_s:.3f}",
+                        "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,format=yuv420p",
+                        "-an", "-c:v", "libx264", "-preset", "ultrafast",
+                        "-pix_fmt", "yuv420p", str(clip_file)
+                    ])
+                    clip_meta = {
+                        "ai_generated": False,
+                        "source": "user-provided local B-roll",
+                        "source_url": None,
+                        "local_file": local_clip.name,
+                        "license": "Verify the original source license before commercial use",
+                        "attribution": "See original clip source",
+                        "reason_chosen": f"Local B-roll clip selected for scene: {hint}",
+                        "relevance_score": None
+                    }
+                    used_real_clip = True
                 except Exception as exc:
-                    warnings.append(f"Scene {idx+1}: stock download/render failed ({type(exc).__name__}); generated graphic fallback used.")
-                    pexels=None
-            if not pexels:
-                reason = provider_warning or "stock-footage provider is not configured"
-                warnings.append(f"Scene {idx+1}: {reason}; generated graphic fallback used. This is not real B-roll; review before publication.")
-                width,height=(1920,1080)
+                    warnings.append(
+                        f"Scene {idx+1}: local B-roll processing failed "
+                        f"({type(exc).__name__}); trying Pexels or graphic fallback."
+                    )
+
+            # If local clips are unavailable or fail, try Pexels.
+            pexels = None
+            provider_warning = None
+            if not used_real_clip:
+                pexels, provider_warning = choose_pexels_video(
+                    hint,
+                    "portrait" if "9:16" in payload.aspect_ratios else "landscape",
+                    used_video_ids
+                )
+
+                if pexels:
+                    try:
+                        vpath = jobdir / f"source_{idx:03}.mp4"
+                        with requests.get(
+                            pexels["url"], stream=True, timeout=(5, 30)
+                        ) as rr:
+                            rr.raise_for_status()
+                            with vpath.open("wb") as out:
+                                total = 0
+                                for chunk in rr.iter_content(1024 * 128):
+                                    total += len(chunk)
+                                    if total > 100 * 1024 * 1024:
+                                        raise ValueError("Downloaded clip exceeds 100 MB")
+                                    out.write(chunk)
+
+                        ffmpeg_run([
+                            FFMPEG, "-y", "-stream_loop", "-1", "-i", str(vpath),
+                            "-t", f"{end_s-start_s:.3f}",
+                            "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,format=yuv420p",
+                            "-an", "-c:v", "libx264", "-preset", "ultrafast",
+                            "-pix_fmt", "yuv420p", str(clip_file)
+                        ])
+                        clip_meta = {
+                            "ai_generated": False,
+                            "source": "Pexels",
+                            "source_url": pexels["page"],
+                            "license": pexels["license"],
+                            "license_url": pexels["license_url"],
+                            "attribution": pexels["photographer"],
+                            "reason_chosen": f"First unused Pexels result for scene hint: {hint}",
+                            "relevance_score": None
+                        }
+                        used_real_clip = True
+                    except Exception as exc:
+                        warnings.append(
+                            f"Scene {idx+1}: Pexels processing failed "
+                            f"({type(exc).__name__}); generated graphic fallback used."
+                        )
+                        pexels = None
+
+            # Last resort: generate a graphic if no real video was processed.
+            if not used_real_clip:
+                reason = provider_warning or "No usable local or Pexels video was available"
+                warnings.append(
+                    f"Scene {idx+1}: {reason}; generated graphic fallback used. "
+                    "This is not real B-roll; review before publication."
+                )
+                width, height = (1920, 1080)
                 make_fallback_visual(scene["text"], visual_file, width, height, idx)
-                ffmpeg_run([FFMPEG,"-y","-loop","1","-i",str(visual_file),"-t",f"{end_s-start_s:.3f}","-r","30","-vf","format=yuv420p","-an","-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p",str(clip_file)])
+                ffmpeg_run([
+                    FFMPEG, "-y", "-loop", "1", "-i", str(visual_file),
+                    "-t", f"{end_s-start_s:.3f}", "-r", "30",
+                    "-vf", "format=yuv420p", "-an", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(clip_file)
+                ])
+
             scene_segments.append(clip_file)
             timeline.append({"scene_id":idx+1,"text":scene["text"],"start":round(start_s,3),"end":round(end_s,3),"duration":round(end_s-start_s,3),"visual_hint":hint,"clip_file":clip_file.name,**clip_meta})
             state["progress"] = 15 + int(55*(idx+1)/n)
@@ -243,7 +320,9 @@ def render_job(job_id: str, request_data: dict[str, Any], audio_upload: str | No
             ffmpeg_run([FFMPEG,"-y","-i",str(base_video),"-i",str(audio_path),"-vf",vf,"-map","0:v:0","-map","1:a:0","-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-c:a","aac","-b:a","128k","-shortest",str(output)])
             output_files.append(output.name)
         elapsed=round(time.monotonic()-start,3)
-        manifest={"job_id":job_id,"application_version":"0.1.0","models_and_providers":{"tts":"eSpeak NG (local)","stock_footage":"Pexels API if PEXELS_API_KEY is configured; otherwise generated title-card fallback","video":"FFmpeg"},"settings":{"voice":payload.voice,"aspect_ratios":payload.aspect_ratios,"style":payload.style,"avoid":payload.avoid,"captions":payload.captions.model_dump()},"seed":None,"timings_seconds":{"total":elapsed},"cost_estimate_usd":None,"warnings":warnings,"rights":{"stock_license":"Pexels License per clip when Pexels is used","fallback":"Generated local graphics; no third-party image assets"},"outputs":output_files}
+        
+        manifest={"job_id":job_id,"application_version":"0.1.0","models_and_providers":{"tts":"eSpeak NG (local)","stock_footage":"User-provided local B-roll clips when available; otherwise Pexels API if configured; otherwise generated title-card fallback","video":"FFmpeg"},"settings":{"voice":payload.voice,"aspect_ratios":payload.aspect_ratios,"style":payload.style,"avoid":payload.avoid,"captions":payload.captions.model_dump()},"seed":None,"timings_seconds":{"total":elapsed},"cost_estimate_usd":None,"warnings":warnings,"rights":{"local_broll":"User-provided media; verify each original source license and attribution requirements before use","stock_license":"Check the applicable Pexels license for each Pexels clip","fallback":"Generated local graphics; no third-party image assets"},"outputs":output_files}
+
         (jobdir/"timeline.json").write_text(json.dumps(timeline,indent=2,ensure_ascii=False),encoding="utf-8")
         (jobdir/"manifest.json").write_text(json.dumps(manifest,indent=2,ensure_ascii=False),encoding="utf-8")
         state.update(status="succeeded",progress=100,completed_at=time.time(),result={"files":output_files+(["captions.srt"] if payload.captions.srt else [])+["timeline.json","manifest.json"],"warnings":warnings,"duration_seconds":duration,"elapsed_seconds":elapsed})
